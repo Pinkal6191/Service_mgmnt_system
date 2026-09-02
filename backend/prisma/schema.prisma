@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MASTER_ADMIN
+  BRANCH_ADMIN
+  TECHNICIAN
+  CUSTOMER
+}
+
+enum BookingStatus {
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum JobStatus {
+  ASSIGNED
+  ACCEPTED
+  REJECTED
+  STARTED
+  COMPLETED
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  BANK_TRANSFER
+  CARD
+}
+
+model User {
+  id             String    @id @default(uuid())
+  role           Role
+  full_name      String
+  email          String    @unique
+  phone          String
+  password_hash  String
+  branch_id      String?
+  is_active      Boolean   @default(true)
+  created_at     DateTime  @default(now())
+
+  // Relations
+  branch         Branch?   @relation("BranchUsers", fields: [branch_id], references: [id])
+  managed_branch Branch?   @relation("BranchAdmin")
+  bookings       Booking[] @relation("CustomerBookings")
+  jobs           JobAssignment[] @relation("TechnicianJobs")
+}
+
+model City {
+  id        String   @id @default(uuid())
+  name      String
+  is_active Boolean  @default(true)
+  
+  branches  Branch[]
+}
+
+model Branch {
+  id             String   @id @default(uuid())
+  city_id        String
+  name           String
+  address        String
+  contact_number String
+  admin_id       String?  @unique
+  is_active      Boolean  @default(true)
+
+  city           City     @relation(fields: [city_id], references: [id])
+  admin          User?    @relation("BranchAdmin", fields: [admin_id], references: [id])
+  users          User[]   @relation("BranchUsers")
+  bookings       Booking[]
+}
+
+model ServiceCategory {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  
+  services    Service[]
+}
+
+model Service {
+  id          String   @id @default(uuid())
+  category_id String
+  name        String
+  description String?
+  base_price  Decimal  @db.Decimal(10, 2)
+  is_active   Boolean  @default(true)
+
+  category    ServiceCategory @relation(fields: [category_id], references: [id])
+  bookings    Booking[]
+}
+
+model Booking {
+  id                  String   @id @default(uuid())
+  booking_reference   String   @unique
+  customer_id         String
+  service_id          String
+  branch_id           String
+  preferred_date_time DateTime
+  address             String
+  problem_description String?
+  status              BookingStatus @default(PENDING)
+  created_at          DateTime @default(now())
+
+  customer            User     @relation("CustomerBookings", fields: [customer_id], references: [id])
+  service             Service  @relation(fields: [service_id], references: [id])
+  branch              Branch   @relation(fields: [branch_id], references: [id])
+  job_assignments     JobAssignment[]
+}
+
+model JobAssignment {
+  id                    String    @id @default(uuid())
+  booking_id            String
+  technician_id         String
+  assigned_at           DateTime  @default(now())
+  accepted_at           DateTime?
+  started_at            DateTime?
+  completed_at          DateTime?
+  tech_notes            String?
+  customer_signature_url String?
+  status                JobStatus @default(ASSIGNED)
+
+  booking               Booking   @relation(fields: [booking_id], references: [id])
+  technician            User      @relation("TechnicianJobs", fields: [technician_id], references: [id])
+  
+  quotation             Quotation?
+  invoice               Invoice?
+  media_attachments     MediaAttachment[]
+  gps_logs              GpsLog[]
+}
+
+model MediaAttachment {
+  id          String   @id @default(uuid())
+  job_id      String
+  type        String // BEFORE_IMAGE, AFTER_IMAGE, DOCUMENT
+  file_url    String
+  uploaded_at DateTime @default(now())
+
+  job         JobAssignment @relation(fields: [job_id], references: [id])
+}
+
+model Quotation {
+  id               String   @id @default(uuid())
+  job_id           String   @unique
+  quotation_number String   @unique
+  labour_charges   Decimal  @db.Decimal(10, 2)
+  material_charges Decimal  @db.Decimal(10, 2)
+  tax_amount       Decimal  @db.Decimal(10, 2)
+  discount         Decimal  @db.Decimal(10, 2) @default(0)
+  total_amount     Decimal  @db.Decimal(10, 2)
+  status           String   // DRAFT, SENT, APPROVED, REJECTED
+  pdf_url          String?
+  created_at       DateTime @default(now())
+
+  job              JobAssignment @relation(fields: [job_id], references: [id])
+}
+
+model Invoice {
+  id               String   @id @default(uuid())
+  job_id           String   @unique
+  invoice_number   String   @unique
+  labour_charges   Decimal  @db.Decimal(10, 2)
+  material_charges Decimal  @db.Decimal(10, 2)
+  gst_amount       Decimal  @db.Decimal(10, 2)
+  discount         Decimal  @db.Decimal(10, 2) @default(0)
+  final_amount     Decimal  @db.Decimal(10, 2)
+  status           String   // UNPAID, PARTIAL, PAID
+  pdf_url          String?
+  created_at       DateTime @default(now())
+
+  job              JobAssignment @relation(fields: [job_id], references: [id])
+  payments         Payment[]
+}
+
+model Payment {
+  id                    String   @id @default(uuid())
+  invoice_id            String
+  amount                Decimal  @db.Decimal(10, 2)
+  payment_mode          PaymentMode
+  transaction_reference String?
+  payment_date          DateTime @default(now())
+
+  invoice               Invoice @relation(fields: [invoice_id], references: [id])
+}
+
+model GpsLog {
+  id            String   @id @default(uuid())
+  job_id        String
+  technician_id String
+  latitude      Decimal  @db.Decimal(9, 6)
+  longitude     Decimal  @db.Decimal(9, 6)
+  event_type    String   // START_TRAVEL, REACHED_SITE, END_SERVICE
+  recorded_at   DateTime @default(now())
+
+  job           JobAssignment @relation(fields: [job_id], references: [id])
+}
+
+model SystemSetting {
+  key   String @id
+  value String
+}
