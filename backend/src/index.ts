@@ -8,6 +8,7 @@ import locationRoutes from './routes/locationRoutes';
 import userRoutes from './routes/userRoutes';
 import serviceRoutes from './routes/serviceRoutes';
 import settingRoutes from './routes/settingRoutes';
+import bookingRoutes from './routes/bookingRoutes';
 
 // Load environment variables
 dotenv.config();
@@ -28,6 +29,7 @@ app.use('/api/locations', locationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/settings', settingRoutes);
+app.use('/api/bookings', bookingRoutes);
 
 // Basic route
 app.get('/', (req: Request, res: Response) => {
