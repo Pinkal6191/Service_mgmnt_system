@@ -4,6 +4,10 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import authRoutes from './routes/authRoutes';
+import locationRoutes from './routes/locationRoutes';
+import userRoutes from './routes/userRoutes';
+import serviceRoutes from './routes/serviceRoutes';
+import settingRoutes from './routes/settingRoutes';
 
 // Load environment variables
 dotenv.config();
@@ -20,6 +24,10 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/locations', locationRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/services', serviceRoutes);
+app.use('/api/settings', settingRoutes);
 
 // Basic route
 app.get('/', (req: Request, res: Response) => {
