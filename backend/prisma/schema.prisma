@@ -26,8 +26,29 @@ enum JobStatus {
   ASSIGNED
   ACCEPTED
   REJECTED
+  ON_THE_WAY
+  ARRIVED
   STARTED
+  DIAGNOSIS
+  QUOTATION_PENDING
+  AWAITING_CUSTOMER_APPROVAL
+  IN_PROGRESS
   COMPLETED
+  CANCELLED
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  APPROVED
+  REJECTED
+}
+
+enum AttachmentType {
+  CUSTOMER_REFERENCE
+  BEFORE_SERVICE
+  AFTER_SERVICE
+  DOCUMENT
 }
 
 enum PaymentMode {
@@ -53,6 +74,9 @@ model User {
   managed_branch Branch?   @relation("BranchAdmin")
   bookings       Booking[] @relation("CustomerBookings")
   jobs           JobAssignment[] @relation("TechnicianJobs")
+  
+  quotation_approvals Quotation[] @relation("QuotationApprover")
+  uploaded_media      MediaAttachment[] @relation("UploadedMedia")
 }
 
 model City {
@@ -110,9 +134,9 @@ model Booking {
   status              BookingStatus @default(PENDING)
   created_at          DateTime @default(now())
 
-  customer            User     @relation("CustomerBookings", fields: [customer_id], references: [id])
+  customer            User     @relation("CustomerBookings", fields: [customer_id], references: [id], onDelete: Restrict)
   service             Service  @relation(fields: [service_id], references: [id])
-  branch              Branch   @relation(fields: [branch_id], references: [id])
+  branch              Branch   @relation(fields: [branch_id], references: [id], onDelete: Restrict)
   job_assignments     JobAssignment[]
 }
 
@@ -128,23 +152,28 @@ model JobAssignment {
   customer_signature_url String?
   status                JobStatus @default(ASSIGNED)
 
-  booking               Booking   @relation(fields: [booking_id], references: [id])
-  technician            User      @relation("TechnicianJobs", fields: [technician_id], references: [id])
+  booking               Booking   @relation(fields: [booking_id], references: [id], onDelete: Restrict)
+  technician            User      @relation("TechnicianJobs", fields: [technician_id], references: [id], onDelete: Restrict)
   
   quotation             Quotation?
   invoice               Invoice?
   media_attachments     MediaAttachment[]
   gps_logs              GpsLog[]
+
+  @@index([booking_id])
+  @@index([technician_id])
 }
 
 model MediaAttachment {
-  id          String   @id @default(uuid())
-  job_id      String
-  type        String // BEFORE_IMAGE, AFTER_IMAGE, DOCUMENT
-  file_url    String
-  uploaded_at DateTime @default(now())
+  id                  String   @id @default(uuid())
+  job_id              String
+  type                AttachmentType
+  file_url            String
+  uploaded_at         DateTime @default(now())
+  uploaded_by_user_id String
 
-  job         JobAssignment @relation(fields: [job_id], references: [id])
+  job                 JobAssignment @relation(fields: [job_id], references: [id], onDelete: Restrict)
+  uploader            User          @relation("UploadedMedia", fields: [uploaded_by_user_id], references: [id], onDelete: Restrict)
 }
 
 model Quotation {
@@ -156,11 +185,33 @@ model Quotation {
   tax_amount       Decimal  @db.Decimal(10, 2)
   discount         Decimal  @db.Decimal(10, 2) @default(0)
   total_amount     Decimal  @db.Decimal(10, 2)
-  status           String   // DRAFT, SENT, APPROVED, REJECTED
+  status           QuotationStatus   @default(DRAFT)
   pdf_url          String?
   created_at       DateTime @default(now())
 
-  job              JobAssignment @relation(fields: [job_id], references: [id])
+  approved_by_user_id    String?
+  approved_at            DateTime?
+  customer_signature_url String?
+  rejection_reason       String?
+
+  job              JobAssignment @relation(fields: [job_id], references: [id], onDelete: Restrict)
+  items            QuotationItem[]
+  approver         User?         @relation("QuotationApprover", fields: [approved_by_user_id], references: [id], onDelete: Restrict)
+}
+
+model QuotationItem {
+  id           String    @id @default(uuid())
+  quotation_id String
+  item_name    String
+  quantity     Int
+  unit_price   Decimal   @db.Decimal(10, 2)
+  tax_rate     Decimal   @db.Decimal(10, 2)
+  tax_amount   Decimal   @db.Decimal(10, 2)
+  total_price  Decimal   @db.Decimal(10, 2)
+
+  quotation    Quotation @relation(fields: [quotation_id], references: [id], onDelete: Cascade)
+
+  @@index([quotation_id])
 }
 
 model Invoice {
@@ -176,8 +227,24 @@ model Invoice {
   pdf_url          String?
   created_at       DateTime @default(now())
 
-  job              JobAssignment @relation(fields: [job_id], references: [id])
+  job              JobAssignment @relation(fields: [job_id], references: [id], onDelete: Restrict)
   payments         Payment[]
+  items            InvoiceItem[]
+}
+
+model InvoiceItem {
+  id           String    @id @default(uuid())
+  invoice_id   String
+  item_name    String
+  quantity     Int
+  unit_price   Decimal   @db.Decimal(10, 2)
+  tax_rate     Decimal   @db.Decimal(10, 2)
+  tax_amount   Decimal   @db.Decimal(10, 2)
+  total_price  Decimal   @db.Decimal(10, 2)
+
+  invoice      Invoice   @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+
+  @@index([invoice_id])
 }
 
 model Payment {
@@ -188,7 +255,7 @@ model Payment {
   transaction_reference String?
   payment_date          DateTime @default(now())
 
-  invoice               Invoice @relation(fields: [invoice_id], references: [id])
+  invoice               Invoice @relation(fields: [invoice_id], references: [id], onDelete: Restrict)
 }
 
 model GpsLog {
@@ -200,7 +267,7 @@ model GpsLog {
   event_type    String   // START_TRAVEL, REACHED_SITE, END_SERVICE
   recorded_at   DateTime @default(now())
 
-  job           JobAssignment @relation(fields: [job_id], references: [id])
+  job           JobAssignment @relation(fields: [job_id], references: [id], onDelete: Restrict)
 }
 
 model SystemSetting {
