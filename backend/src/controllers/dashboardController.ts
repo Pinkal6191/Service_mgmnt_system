@@ -6,7 +6,17 @@ export const getMasterDashboard = async (req: Request, res: Response): Promise<v
     const totalCustomers = await prisma.user.count({ where: { role: 'CUSTOMER' } });
     const totalTechnicians = await prisma.user.count({ where: { role: 'TECHNICIAN' } });
     const totalBranches = await prisma.branch.count({ where: { is_active: true } });
-    const pendingServices = await prisma.jobAssignment.count({ where: { status: { in: ['ASSIGNED', 'ACCEPTED', 'STARTED'] } } });
+    const pendingServices = await prisma.jobAssignment.count({ 
+      where: { 
+        status: { 
+          in: [
+            'ASSIGNED', 'ACCEPTED', 'ON_THE_WAY', 'ARRIVED', 
+            'STARTED', 'DIAGNOSIS', 'QUOTATION_PENDING', 
+            'AWAITING_CUSTOMER_APPROVAL', 'IN_PROGRESS'
+          ] 
+        } 
+      } 
+    });
     const completedServices = await prisma.jobAssignment.count({ where: { status: 'COMPLETED' } });
     
     // Revenue Summary
@@ -38,7 +48,13 @@ export const getBranchDashboard = async (req: Request, res: Response): Promise<v
 
     const pendingServices = await prisma.jobAssignment.count({
       where: { 
-        status: { in: ['ASSIGNED', 'ACCEPTED', 'STARTED'] },
+        status: { 
+          in: [
+            'ASSIGNED', 'ACCEPTED', 'ON_THE_WAY', 'ARRIVED', 
+            'STARTED', 'DIAGNOSIS', 'QUOTATION_PENDING', 
+            'AWAITING_CUSTOMER_APPROVAL', 'IN_PROGRESS'
+          ] 
+        },
         booking: { branch_id }
       }
     });
