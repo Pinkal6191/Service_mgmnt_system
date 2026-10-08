@@ -12,6 +12,7 @@ import bookingRoutes from './routes/bookingRoutes';
 import jobRoutes from './routes/jobRoutes';
 import billingRoutes from './routes/billingRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
+import quotationRoutes from './routes/quotationRoutes';
 
 // Load environment variables
 dotenv.config();
@@ -36,6 +37,7 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/dashboards', dashboardRoutes);
+app.use('/api/quotations', quotationRoutes);
 
 // Basic route
 app.get('/', (req: Request, res: Response) => {
