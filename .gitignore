@@ -3,3 +3,11 @@ node_modules/
 .DS_Store
 dist/
 
+# TypeScript build artifacts in source directories
+*.js.map
+*.d.ts
+*.d.ts.map
+backend/src/**/*.js
+backend/prisma.config.js
+
+
