@@ -5,7 +5,9 @@ import {
   addQuotationItem, 
   updateQuotationItem, 
   removeQuotationItem, 
-  sendQuotation 
+  sendQuotation,
+  approveQuotation,
+  rejectQuotation
 } from '../controllers/quotationController';
 import { authenticate, authorize } from '../middleware/auth';
 
@@ -28,5 +30,11 @@ router.delete('/:id/items/:itemId', authenticate, authorize(['MASTER_ADMIN', 'BR
 
 // Send quotation
 router.post('/:id/send', authenticate, authorize(['MASTER_ADMIN', 'BRANCH_ADMIN', 'TECHNICIAN']), sendQuotation);
+
+// Customer approval
+router.post('/:id/approve', authenticate, authorize(['CUSTOMER']), approveQuotation);
+
+// Customer rejection
+router.post('/:id/reject', authenticate, authorize(['CUSTOMER']), rejectQuotation);
 
 export default router;

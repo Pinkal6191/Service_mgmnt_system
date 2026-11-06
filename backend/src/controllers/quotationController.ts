@@ -356,3 +356,126 @@ export const sendQuotation = async (req: Request, res: Response): Promise<void> 
     res.status(500).json({ error: 'Failed to send quotation' });
   }
 };
+
+export const approveQuotation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const user = (req as any).user;
+
+    if (user.role !== 'CUSTOMER') {
+      res.status(403).json({ error: 'Only customers can approve quotations' });
+      return;
+    }
+
+    const quotation = await verifyQuotationOwnership(id, user);
+    if (!quotation) {
+      res.status(404).json({ error: 'Quotation not found or access denied' });
+      return;
+    }
+
+    if (quotation.status !== 'SENT') {
+      res.status(400).json({ error: `Quotation is in ${quotation.status} status; only SENT quotations can be approved` });
+      return;
+    }
+
+    if (quotation.job.status !== 'AWAITING_CUSTOMER_APPROVAL') {
+      res.status(400).json({ error: `Job is in ${quotation.job.status} status; expected AWAITING_CUSTOMER_APPROVAL` });
+      return;
+    }
+
+    if (!isTransitionAllowed(quotation.job.status as JobStatus, 'IN_PROGRESS')) {
+      res.status(400).json({ error: `Invalid job status transition: ${quotation.job.status} -> IN_PROGRESS` });
+      return;
+    }
+
+    const updatedQuotation = await prisma.$transaction(async (tx) => {
+      const approved = await tx.quotation.update({
+        where: { id },
+        data: {
+          status: 'APPROVED',
+          approved_by_user_id: user.id as string,
+          approved_at: new Date()
+        }
+      });
+
+      await tx.jobAssignment.update({
+        where: { id: quotation.job_id },
+        data: { status: 'IN_PROGRESS' }
+      });
+
+      return approved;
+    });
+
+    res.status(200).json({
+      message: 'Quotation approved successfully',
+      quotation: updatedQuotation
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to approve quotation' });
+  }
+};
+
+export const rejectQuotation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const { rejection_reason } = req.body;
+    const user = (req as any).user;
+
+    if (user.role !== 'CUSTOMER') {
+      res.status(403).json({ error: 'Only customers can reject quotations' });
+      return;
+    }
+
+    if (!rejection_reason || typeof rejection_reason !== 'string' || rejection_reason.trim() === '') {
+      res.status(400).json({ error: 'Rejection reason is required' });
+      return;
+    }
+
+    const quotation = await verifyQuotationOwnership(id, user);
+    if (!quotation) {
+      res.status(404).json({ error: 'Quotation not found or access denied' });
+      return;
+    }
+
+    if (quotation.status !== 'SENT') {
+      res.status(400).json({ error: `Quotation is in ${quotation.status} status; only SENT quotations can be rejected` });
+      return;
+    }
+
+    if (quotation.job.status !== 'AWAITING_CUSTOMER_APPROVAL') {
+      res.status(400).json({ error: `Job is in ${quotation.job.status} status; expected AWAITING_CUSTOMER_APPROVAL` });
+      return;
+    }
+
+    if (!isTransitionAllowed(quotation.job.status as JobStatus, 'CANCELLED')) {
+      res.status(400).json({ error: `Invalid job status transition: ${quotation.job.status} -> CANCELLED` });
+      return;
+    }
+
+    const updatedQuotation = await prisma.$transaction(async (tx) => {
+      const rejected = await tx.quotation.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          rejection_reason: (rejection_reason as string).trim()
+        }
+      });
+
+      await tx.jobAssignment.update({
+        where: { id: quotation.job_id },
+        data: { status: 'CANCELLED' }
+      });
+
+      return rejected;
+    });
+
+    res.status(200).json({
+      message: 'Quotation rejected successfully',
+      quotation: updatedQuotation
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to reject quotation' });
+  }
+};

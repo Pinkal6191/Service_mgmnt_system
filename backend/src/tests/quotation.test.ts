@@ -7,7 +7,9 @@ import {
   updateQuotationItem,
   removeQuotationItem,
   sendQuotation,
-  getQuotation
+  getQuotation,
+  approveQuotation,
+  rejectQuotation
 } from '../controllers/quotationController';
 import { Decimal } from '@prisma/client/runtime/library';
 
@@ -335,6 +337,334 @@ describe('Quotation API', () => {
     await addQuotationItem(req, res);
     assert.strictEqual(res.statusCode, 400);
     assert.ok(res.data.error.includes('Only DRAFT'));
+  });
+
+  // ==========================================
+  // PHASE 2B: APPROVAL TESTS
+  // ==========================================
+
+  it('CUSTOMER: should successfully approve their own SENT quotation', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      job_id: 'job-1',
+      status: 'SENT',
+      job: {
+        id: 'job-1',
+        status: 'AWAITING_CUSTOMER_APPROVAL',
+        booking: { customer_id: 'cust-1', branch_id: 'branch-1' }
+      }
+    });
+
+    let qUpdated: any = null;
+    let jUpdated: any = null;
+
+    (prisma.quotation.update as any) = async (args: any) => {
+      qUpdated = args.data;
+      return { id: 'q-1', ...args.data };
+    };
+    (prisma.jobAssignment.update as any) = async (args: any) => {
+      jUpdated = args.data;
+      return { id: 'job-1', ...args.data };
+    };
+
+    const { req, res } = mockReqRes({ role: 'CUSTOMER', id: 'cust-1' }, {}, { id: 'q-1' });
+
+    await approveQuotation(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(qUpdated.status, 'APPROVED');
+    assert.strictEqual(qUpdated.approved_by_user_id, 'cust-1');
+    assert.ok(qUpdated.approved_at instanceof Date);
+    assert.strictEqual(jUpdated.status, 'IN_PROGRESS');
+    assert.strictEqual(res.data.message, 'Quotation approved successfully');
+  });
+
+  // ==========================================
+  // PHASE 2B: REJECTION TESTS
+  // ==========================================
+
+  it('CUSTOMER: should successfully reject their own SENT quotation with reason', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      job_id: 'job-1',
+      status: 'SENT',
+      job: {
+        id: 'job-1',
+        status: 'AWAITING_CUSTOMER_APPROVAL',
+        booking: { customer_id: 'cust-1', branch_id: 'branch-1' }
+      }
+    });
+
+    let qUpdated: any = null;
+    let jUpdated: any = null;
+
+    (prisma.quotation.update as any) = async (args: any) => {
+      qUpdated = args.data;
+      return { id: 'q-1', ...args.data };
+    };
+    (prisma.jobAssignment.update as any) = async (args: any) => {
+      jUpdated = args.data;
+      return { id: 'job-1', ...args.data };
+    };
+
+    const { req, res } = mockReqRes(
+      { role: 'CUSTOMER', id: 'cust-1' },
+      { rejection_reason: 'Price is too high' },
+      { id: 'q-1' }
+    );
+
+    await rejectQuotation(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(qUpdated.status, 'REJECTED');
+    assert.strictEqual(qUpdated.rejection_reason, 'Price is too high');
+    assert.strictEqual(jUpdated.status, 'CANCELLED');
+    assert.strictEqual(res.data.message, 'Quotation rejected successfully');
+  });
+
+  it('REJECTION: should require a valid non-empty rejection reason', async () => {
+    const { req, res } = mockReqRes(
+      { role: 'CUSTOMER', id: 'cust-1' },
+      { rejection_reason: '   ' },
+      { id: 'q-1' }
+    );
+
+    await rejectQuotation(req, res);
+    assert.strictEqual(res.statusCode, 400);
+    assert.strictEqual(res.data.error, 'Rejection reason is required');
+  });
+
+  // ==========================================
+  // PHASE 2B: SECURITY & RBAC TESTS
+  // ==========================================
+
+  it('RBAC: non-customers (TECHNICIAN, BRANCH_ADMIN, MASTER_ADMIN) cannot approve quotations', async () => {
+    for (const role of ['TECHNICIAN', 'BRANCH_ADMIN', 'MASTER_ADMIN']) {
+      const { req, res } = mockReqRes({ role, id: 'user-1', branch_id: 'branch-1' }, {}, { id: 'q-1' });
+      await approveQuotation(req, res);
+      assert.strictEqual(res.statusCode, 403);
+      assert.strictEqual(res.data.error, 'Only customers can approve quotations');
+    }
+  });
+
+  it('RBAC: non-customers (TECHNICIAN, BRANCH_ADMIN, MASTER_ADMIN) cannot reject quotations', async () => {
+    for (const role of ['TECHNICIAN', 'BRANCH_ADMIN', 'MASTER_ADMIN']) {
+      const { req, res } = mockReqRes(
+        { role, id: 'user-1', branch_id: 'branch-1' },
+        { rejection_reason: 'Reason' },
+        { id: 'q-1' }
+      );
+      await rejectQuotation(req, res);
+      assert.strictEqual(res.statusCode, 403);
+      assert.strictEqual(res.data.error, 'Only customers can reject quotations');
+    }
+  });
+
+  it('IDOR: customer cannot approve another customer quotation', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      job_id: 'job-1',
+      status: 'SENT',
+      job: {
+        id: 'job-1',
+        status: 'AWAITING_CUSTOMER_APPROVAL',
+        booking: { customer_id: 'cust-2', branch_id: 'branch-1' }
+      }
+    });
+
+    const { req, res } = mockReqRes({ role: 'CUSTOMER', id: 'cust-1' }, {}, { id: 'q-1' });
+
+    await approveQuotation(req, res);
+    assert.strictEqual(res.statusCode, 404);
+    assert.strictEqual(res.data.error, 'Quotation not found or access denied');
+  });
+
+  it('IDOR: customer cannot reject another customer quotation', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      job_id: 'job-1',
+      status: 'SENT',
+      job: {
+        id: 'job-1',
+        status: 'AWAITING_CUSTOMER_APPROVAL',
+        booking: { customer_id: 'cust-2', branch_id: 'branch-1' }
+      }
+    });
+
+    const { req, res } = mockReqRes(
+      { role: 'CUSTOMER', id: 'cust-1' },
+      { rejection_reason: 'Too expensive' },
+      { id: 'q-1' }
+    );
+
+    await rejectQuotation(req, res);
+    assert.strictEqual(res.statusCode, 404);
+    assert.strictEqual(res.data.error, 'Quotation not found or access denied');
+  });
+
+  // ==========================================
+  // PHASE 2B: INVALID STATE TESTS
+  // ==========================================
+
+  it('INVALID STATE: DRAFT quotation cannot be approved', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      status: 'DRAFT',
+      job: { status: 'AWAITING_CUSTOMER_APPROVAL', booking: { customer_id: 'cust-1' } }
+    });
+
+    const { req, res } = mockReqRes({ role: 'CUSTOMER', id: 'cust-1' }, {}, { id: 'q-1' });
+    await approveQuotation(req, res);
+    assert.strictEqual(res.statusCode, 400);
+    assert.ok(res.data.error.includes('only SENT quotations can be approved'));
+  });
+
+  it('INVALID STATE: DRAFT quotation cannot be rejected', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      status: 'DRAFT',
+      job: { status: 'AWAITING_CUSTOMER_APPROVAL', booking: { customer_id: 'cust-1' } }
+    });
+
+    const { req, res } = mockReqRes(
+      { role: 'CUSTOMER', id: 'cust-1' },
+      { rejection_reason: 'No longer needed' },
+      { id: 'q-1' }
+    );
+    await rejectQuotation(req, res);
+    assert.strictEqual(res.statusCode, 400);
+    assert.ok(res.data.error.includes('only SENT quotations can be rejected'));
+  });
+
+  it('INVALID STATE: APPROVED quotation cannot be approved or rejected again (Terminal)', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      status: 'APPROVED',
+      job: { status: 'IN_PROGRESS', booking: { customer_id: 'cust-1' } }
+    });
+
+    // Attempt re-approval
+    const { req: req1, res: res1 } = mockReqRes({ role: 'CUSTOMER', id: 'cust-1' }, {}, { id: 'q-1' });
+    await approveQuotation(req1, res1);
+    assert.strictEqual(res1.statusCode, 400);
+    assert.ok(res1.data.error.includes('only SENT quotations can be approved'));
+
+    // Attempt rejection on approved
+    const { req: req2, res: res2 } = mockReqRes(
+      { role: 'CUSTOMER', id: 'cust-1' },
+      { rejection_reason: 'Changed mind' },
+      { id: 'q-1' }
+    );
+    await rejectQuotation(req2, res2);
+    assert.strictEqual(res2.statusCode, 400);
+    assert.ok(res2.data.error.includes('only SENT quotations can be rejected'));
+  });
+
+  it('INVALID STATE: REJECTED quotation cannot be approved or rejected again (Terminal)', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      status: 'REJECTED',
+      job: { status: 'CANCELLED', booking: { customer_id: 'cust-1' } }
+    });
+
+    // Attempt approval on rejected
+    const { req: req1, res: res1 } = mockReqRes({ role: 'CUSTOMER', id: 'cust-1' }, {}, { id: 'q-1' });
+    await approveQuotation(req1, res1);
+    assert.strictEqual(res1.statusCode, 400);
+    assert.ok(res1.data.error.includes('only SENT quotations can be approved'));
+
+    // Attempt re-rejection
+    const { req: req2, res: res2 } = mockReqRes(
+      { role: 'CUSTOMER', id: 'cust-1' },
+      { rejection_reason: 'Reject again' },
+      { id: 'q-1' }
+    );
+    await rejectQuotation(req2, res2);
+    assert.strictEqual(res2.statusCode, 400);
+    assert.ok(res2.data.error.includes('only SENT quotations can be rejected'));
+  });
+
+  it('INVALID STATE: quotation approval fails if job is not in AWAITING_CUSTOMER_APPROVAL', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      job_id: 'job-1',
+      status: 'SENT',
+      job: {
+        id: 'job-1',
+        status: 'DIAGNOSIS',
+        booking: { customer_id: 'cust-1', branch_id: 'branch-1' }
+      }
+    });
+
+    const { req, res } = mockReqRes({ role: 'CUSTOMER', id: 'cust-1' }, {}, { id: 'q-1' });
+    await approveQuotation(req, res);
+    assert.strictEqual(res.statusCode, 400);
+    assert.ok(res.data.error.includes('expected AWAITING_CUSTOMER_APPROVAL'));
+  });
+
+  // ==========================================
+  // PHASE 2B: TRANSACTION ATOMICITY & ROLLBACK TESTS
+  // ==========================================
+
+  it('TRANSACTION ATOMICITY: approval rolls back if job assignment update fails', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      job_id: 'job-1',
+      status: 'SENT',
+      job: {
+        id: 'job-1',
+        status: 'AWAITING_CUSTOMER_APPROVAL',
+        booking: { customer_id: 'cust-1', branch_id: 'branch-1' }
+      }
+    });
+
+    let quotationUpdated = false;
+    (prisma.quotation.update as any) = async () => {
+      quotationUpdated = true;
+      return { id: 'q-1', status: 'APPROVED' };
+    };
+
+    // Simulate Job update failure
+    (prisma.jobAssignment.update as any) = async () => {
+      throw new Error('Database write error on jobAssignment');
+    };
+
+    const { req, res } = mockReqRes({ role: 'CUSTOMER', id: 'cust-1' }, {}, { id: 'q-1' });
+
+    await approveQuotation(req, res);
+    assert.strictEqual(res.statusCode, 500);
+    assert.strictEqual(res.data.error, 'Failed to approve quotation');
+  });
+
+  it('TRANSACTION ATOMICITY: rejection rolls back if job assignment update fails', async () => {
+    (prisma.quotation.findUnique as any) = async () => ({
+      id: 'q-1',
+      job_id: 'job-1',
+      status: 'SENT',
+      job: {
+        id: 'job-1',
+        status: 'AWAITING_CUSTOMER_APPROVAL',
+        booking: { customer_id: 'cust-1', branch_id: 'branch-1' }
+      }
+    });
+
+    (prisma.quotation.update as any) = async () => {
+      return { id: 'q-1', status: 'REJECTED' };
+    };
+
+    (prisma.jobAssignment.update as any) = async () => {
+      throw new Error('Database write error on jobAssignment during cancellation');
+    };
+
+    const { req, res } = mockReqRes(
+      { role: 'CUSTOMER', id: 'cust-1' },
+      { rejection_reason: 'Too expensive' },
+      { id: 'q-1' }
+    );
+
+    await rejectQuotation(req, res);
+    assert.strictEqual(res.statusCode, 500);
+    assert.strictEqual(res.data.error, 'Failed to reject quotation');
   });
 
 });
